@@ -1,0 +1,35 @@
+# Render Blueprint — deploys BOTH the Node API and the static web from this repo.
+# Docs: https://render.com/docs/blueprint-spec
+#
+# The API must be a persistent Node web service (not serverless): it spawns the
+# MCP server as a child process over stdio and streams SSE.
+services:
+  # --- API: Express + agentic Claude loop + MCP client (spawns the MCP server) ---
+  - type: web
+    name: job-fit-analyzer-api
+    runtime: node
+    plan: free
+    region: oregon
+    # npm ci --include=dev keeps TypeScript/tsx available for the build even
+    # though Render sets NODE_ENV=production.
+    buildCommand: npm ci --include=dev && npm run build:mcp && npm run build -w @jfa/server
+    startCommand: npm start -w @jfa/server
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # Secret — set this in the Render dashboard, not in this file.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+
+  # --- Web: React + Vite static build ---
+  - type: web
+    name: job-fit-analyzer-web
+    runtime: static
+    buildCommand: npm ci --include=dev && npm run build -w @jfa/web
+    staticPublishPath: ./packages/web/dist
+    envVars:
+      # Baked into the JS at build time. If Render appends a suffix to the API
+      # service name (global name collision), update this and redeploy the web.
+      - key: VITE_API_BASE
+        value: https://job-fit-analyzer-api.onrender.com

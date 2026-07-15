@@ -55,10 +55,29 @@ npm run dev               # builds the MCP server, then starts API + web
 mode that exercises the MCP coverage tool directly (deterministic, no LLM) so you can see
 the pipeline end-to-end before wiring up billing.
 
-## Next steps (the week's work)
+## Deploy (Render Blueprint)
 
-- [ ] Render the streamed Markdown properly (add `react-markdown`).
+`render.yaml` in the repo root deploys both services in one go:
+
+- **API** (`job-fit-analyzer-api`) — Node web service. Persistent, not serverless,
+  because it spawns the MCP server as a child process and streams SSE.
+- **Web** (`job-fit-analyzer-web`) — static Vite build served from a CDN.
+
+Steps:
+
+1. In Render, **New → Blueprint**, connect this repo. Render reads `render.yaml`.
+2. On the **API** service, set `ANTHROPIC_API_KEY` (marked `sync: false` so it stays
+   out of git). Without it the API still runs in demo mode.
+3. The web is pointed at the API via `VITE_API_BASE`
+   (`https://job-fit-analyzer-api.onrender.com`). If Render appended a suffix to the
+   API's name, update that env var on the web service and redeploy.
+
+The web reads `VITE_API_BASE` at build time; locally it's unset, so the Vite dev proxy
+forwards `/api` to `:8787`.
+
+## Next steps
+
+- [x] Render the streamed Markdown properly (add `react-markdown`).
 - [ ] Smarter matching in the MCP tool (synonyms, stemming, "3 years React" vs "React").
 - [ ] A second MCP tool, e.g. `suggest_resume_edits`, and let Claude chain them.
 - [ ] Persist past analyses; add a share link.
-- [ ] Deploy (Vercel for web, a small Node host for the API).
