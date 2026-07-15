@@ -14,7 +14,9 @@ app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, hasKey: Boolean(process.env.ANTHROPIC_API_KEY) });
+  // DEMO=1 forces the no-LLM path, so report it as keyless for an accurate UI badge.
+  const live = Boolean(process.env.ANTHROPIC_API_KEY) && process.env.DEMO !== "1";
+  res.json({ ok: true, hasKey: live });
 });
 
 app.post("/api/analyze", async (req, res) => {

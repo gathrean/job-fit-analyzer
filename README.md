@@ -1,26 +1,33 @@
 # Job-Fit Analyzer
 
-Paste a job posting and your resume; Claude scores how well you match and tells you
-which requirements you cover and which you're missing.
+> Paste a job posting and a resume. Claude scores the fit and lists which requirements are covered versus missing, grounded by a custom MCP server so the result is checked, not hallucinated.
 
-The point of the project is the architecture, not the feature: a **React + TypeScript**
-front-end talks to a **Node** backend, which runs an **agentic Claude loop** that calls
-a **custom MCP (Model Context Protocol) server** for the one thing an LLM shouldn't be
-trusted to do by itself — deciding whether a specific skill literally appears in the
-resume. That deterministic tool is what keeps the analysis grounded instead of
-hallucinated.
+![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-Express-339933?logo=nodedotjs&logoColor=white)
+![MCP](https://img.shields.io/badge/MCP-Model%20Context%20Protocol-111111)
+![Claude](https://img.shields.io/badge/Claude-Anthropic%20API-D97757)
+
+The point of this project is the architecture, not the feature. A **React + TypeScript**
+front-end talks to a **Node/Express** backend that runs an **agentic Claude loop**. That loop
+calls a **custom MCP (Model Context Protocol) server** for the one thing an LLM should not be
+trusted to decide on its own: whether a specific skill literally appears in the resume. That
+deterministic tool is what keeps the analysis grounded instead of hallucinated.
 
 ## Architecture
 
+```mermaid
+flowchart LR
+    U([User]) -->|posting + resume| W[React + TS UI<br/>packages/web]
+    W <-->|POST /api/analyze<br/>SSE stream| S[Node / Express<br/>packages/server]
+    S <-->|agentic loop| C[Claude · Anthropic API]
+    S <-->|MCP client · stdio| M[MCP server<br/>packages/mcp-server]
+    M --> T1[check_keyword_coverage]
+    M --> T2[suggest_resume_edits]
 ```
-  React + TS (Vite)                Node / Express                MCP server (stdio)
-  packages/web            --->     packages/server      --->     packages/mcp-server
-  - two textareas                  - POST /api/analyze           - two tools (no LLM):
-  - streams the result             - agentic Claude loop           check_keyword_coverage
-    over fetch/SSE                  (@anthropic-ai/sdk)             suggest_resume_edits
-                                   - MCP client spawns and
-                                     calls the MCP server
-```
+
+Two deterministic tools on the MCP server (no LLM) decide the facts: `check_keyword_coverage`
+and `suggest_resume_edits`. The model orchestrates and chains them; the tools ground every claim.
 
 Flow of one analysis:
 

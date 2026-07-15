@@ -23,6 +23,22 @@ Never claim a requirement is met unless check_keyword_coverage marked it covered
 
 export type Send = (event: string, data: unknown) => void;
 
+/**
+ * Forward a tool's JSON result to the client as a typed event, so the UI can render
+ * a real score gauge and covered/missing breakdown instead of dumping raw text. Both
+ * the live loop and demo mode share this, so the interface looks the same either way.
+ */
+function emitStructured(toolName: string, output: string, send: Send): void {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(output);
+  } catch {
+    return; // non-JSON tool output; nothing structured to emit
+  }
+  if (toolName === "check_keyword_coverage") send("coverage", parsed);
+  else if (toolName === "suggest_resume_edits") send("suggestions", parsed);
+}
+
 export interface AnalyzeInput {
   jobPosting: string;
   resume: string;
@@ -34,7 +50,9 @@ export interface AnalyzeInput {
  * Falls back to a no-LLM demo (still using the MCP tool) when no API key is set.
  */
 export async function analyze({ jobPosting, resume }: AnalyzeInput, send: Send): Promise<void> {
-  if (!process.env.ANTHROPIC_API_KEY) {
+  // DEMO=1 forces the no-LLM path even when a key is present (useful for showing the
+  // pipeline, or while billing is being set up).
+  if (process.env.DEMO === "1" || !process.env.ANTHROPIC_API_KEY) {
     await runDemo({ jobPosting, resume }, send);
     return;
   }
@@ -70,6 +88,7 @@ export async function analyze({ jobPosting, resume }: AnalyzeInput, send: Send):
       if (block.type === "tool_use") {
         send("tool", { name: block.name, input: block.input });
         const output = await callMcpTool(block.name, block.input as Record<string, unknown>);
+        emitStructured(block.name, output, send);
         toolResults.push({
           type: "tool_result",
           tool_use_id: block.id,
@@ -83,33 +102,52 @@ export async function analyze({ jobPosting, resume }: AnalyzeInput, send: Send):
   send("done", {});
 }
 
-/** No API key: still show the MCP tool working end-to-end. */
-async function runDemo({ jobPosting, resume }: AnalyzeInput, send: Send): Promise<void> {
-  send(
-    "delta",
-    "**Demo mode** (no `ANTHROPIC_API_KEY` set). Running the MCP coverage tool directly — no LLM.\n\n",
-  );
+/** Common skills/phrases the demo scans a posting for, so requirements read as intentional. */
+const SKILL_VOCAB = [
+  "React Native", "React", "Next.js", "Redux", "TypeScript", "JavaScript", "ES6",
+  "HTML", "CSS", "Tailwind", "Vite", "Node.js", "Express", "REST API", "GraphQL",
+  "Python", "Java", "C++", "C#", "SQL", "PostgreSQL", "MySQL", "MongoDB", "Redis",
+  "Docker", "Kubernetes", "AWS", "GCP", "Azure", "CI/CD", "Jest", "Cypress",
+  "Playwright", "unit testing", "accessibility", "GenAI", "MCP",
+  "agentic workflows", "prompt engineering", "microservices", "UI/UX",
+];
 
-  // Naive keyword pull — good enough to show the tools working without an LLM.
-  // (With an API key, Claude does the real extraction.) Drop obvious noise words
-  // so the demo output reads like requirements, not sentence filler.
+/**
+ * Demo requirement extraction (no LLM). Scan the posting for known skills; if too few
+ * land, fall back to salient words so an arbitrary posting still exercises the tools.
+ * With an API key, Claude does this extraction properly instead.
+ */
+function extractRequirements(posting: string): string[] {
+  const lower = posting.toLowerCase();
+  const hits = SKILL_VOCAB.filter((s) => lower.includes(s.toLowerCase()));
+  // Drop a skill fully contained in a longer match (e.g. "React" when "React Native" hit).
+  const deduped = hits.filter(
+    (s) => !hits.some((o) => o !== s && o.toLowerCase().includes(s.toLowerCase())),
+  );
+  if (deduped.length >= 4) return deduped.slice(0, 12);
+
   const STOP = new Set([
     "need", "and", "with", "the", "for", "you", "our", "are", "will", "must",
     "have", "want", "years", "year", "experience", "engineer", "developer",
     "strong", "plus", "who", "this", "that", "role", "team", "work", "using",
   ]);
-  const requirements = Array.from(
-    new Set((jobPosting.match(/[A-Za-z][A-Za-z+.#]{2,}/g) ?? []).map((s) => s)),
+  return Array.from(
+    new Set((posting.match(/[A-Za-z][A-Za-z+.#]{2,}/g) ?? []).map((s) => s.replace(/\.+$/, ""))),
   )
     .filter((w) => !STOP.has(w.toLowerCase()))
     .slice(0, 12);
+}
+
+/** No API key: still run both MCP tools end-to-end and emit the same structured events. */
+async function runDemo({ jobPosting, resume }: AnalyzeInput, send: Send): Promise<void> {
+  const requirements = extractRequirements(jobPosting);
 
   const coverage = await callMcpTool("check_keyword_coverage", {
     resume_text: resume,
     requirements,
   });
   send("tool", { name: "check_keyword_coverage", input: { requirements } });
-  send("delta", "**check_keyword_coverage**\n\n```json\n" + coverage + "\n```\n\n");
+  emitStructured("check_keyword_coverage", coverage, send);
 
   // Chain the second tool on whatever came back missing — the same flow Claude runs.
   const missing = (JSON.parse(coverage) as { missing?: string[] }).missing ?? [];
@@ -119,9 +157,8 @@ async function runDemo({ jobPosting, resume }: AnalyzeInput, send: Send): Promis
       missing_requirements: missing,
     });
     send("tool", { name: "suggest_resume_edits", input: { missing_requirements: missing } });
-    send("delta", "**suggest_resume_edits** (chained on the gaps)\n\n```json\n" + edits + "\n```\n\n");
+    emitStructured("suggest_resume_edits", edits, send);
   }
 
-  send("delta", "Set `ANTHROPIC_API_KEY` in `.env` for the full AI analysis.");
   send("done", {});
 }

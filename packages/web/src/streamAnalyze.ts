@@ -1,15 +1,40 @@
-export interface StreamHandlers {
-  onDelta: (text: string) => void;
-  onTool: (info: { name: string; input: unknown }) => void;
-  onError: (message: string) => void;
-  onDone: () => void;
-}
-
 /**
  * Absolute API origin in production (e.g. the Render API service). Empty in dev
  * so requests stay same-origin and the Vite proxy forwards /api to :8787.
  */
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
+
+export interface CoverageItem {
+  requirement: string;
+  skill: string;
+  covered: boolean;
+  match_type: "exact" | "alias" | "stemmed" | "partial" | "none";
+  evidence?: string;
+}
+
+export interface CoverageResult {
+  coverage_score: number;
+  covered: string[];
+  missing: string[];
+  results: CoverageItem[];
+}
+
+export interface Suggestion {
+  requirement: string;
+  skill: string;
+  category: string;
+  related_present: string[];
+  suggestion: string;
+}
+
+export interface StreamHandlers {
+  onDelta: (text: string) => void;
+  onTool: (info: { name: string; input: unknown }) => void;
+  onCoverage: (data: CoverageResult) => void;
+  onSuggestions: (data: Suggestion[]) => void;
+  onError: (message: string) => void;
+  onDone: () => void;
+}
 
 /**
  * POSTs to /api/analyze and parses the Server-Sent Events off the streamed
@@ -57,6 +82,12 @@ export async function streamAnalyze(
           break;
         case "tool":
           handlers.onTool(parsed as { name: string; input: unknown });
+          break;
+        case "coverage":
+          handlers.onCoverage(parsed as CoverageResult);
+          break;
+        case "suggestions":
+          handlers.onSuggestions((parsed as { suggestions: Suggestion[] }).suggestions ?? []);
           break;
         case "error":
           handlers.onError((parsed as { message: string }).message);
