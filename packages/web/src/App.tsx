@@ -1,4 +1,6 @@
 import { useState } from "react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { streamAnalyze } from "./streamAnalyze";
 
 interface ToolCall {
@@ -94,10 +96,10 @@ export default function App() {
         {(output || running) && (
           <section className="mt-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
             <h2 className="mb-3 text-lg font-semibold">Result</h2>
-            <pre className="whitespace-pre-wrap font-sans text-[15px] leading-relaxed text-slate-800">
-              {output}
+            <div className="prose prose-slate max-w-none prose-pre:bg-slate-900 prose-pre:text-slate-100">
+              <Markdown remarkPlugins={[remarkGfm]}>{output}</Markdown>
               {running && <span className="animate-pulse">▍</span>}
-            </pre>
+            </div>
           </section>
         )}
       </div>
