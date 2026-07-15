@@ -1,4 +1,10 @@
-import "dotenv/config";
+import { config } from "dotenv";
+import { fileURLToPath } from "node:url";
+// npm runs workspace scripts with the package as CWD, so dotenv's default lookup
+// misses the repo-root .env. Resolve it relative to this file instead (works from
+// both src/ under tsx and dist/ under node — both are one level below the package).
+config({ path: fileURLToPath(new URL("../../../.env", import.meta.url)) });
+
 import express from "express";
 import cors from "cors";
 import { analyze, type Send } from "./analyze.js";
