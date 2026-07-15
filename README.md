@@ -15,9 +15,9 @@ hallucinated.
 ```
   React + TS (Vite)                Node / Express                MCP server (stdio)
   packages/web            --->     packages/server      --->     packages/mcp-server
-  - two textareas                  - POST /api/analyze           - one tool:
+  - two textareas                  - POST /api/analyze           - two tools (no LLM):
   - streams the result             - agentic Claude loop           check_keyword_coverage
-    over fetch/SSE                  (@anthropic-ai/sdk)             (deterministic, no LLM)
+    over fetch/SSE                  (@anthropic-ai/sdk)             suggest_resume_edits
                                    - MCP client spawns and
                                      calls the MCP server
 ```
@@ -26,11 +26,15 @@ Flow of one analysis:
 
 1. Claude reads the posting and extracts a short list of concrete requirements.
 2. Claude calls `check_keyword_coverage(resume_text, requirements)` on the MCP server.
-   The server does plain string/token matching — no model involved — and returns exactly
-   which requirements are present.
-3. Claude writes the fit score, strengths, and gaps **using only the tool's result as
-   ground truth**. That is the anti-hallucination story: the model orchestrates, the tool
-   decides what's actually in the resume.
+   The server matches deterministically — no model involved — handling aliases
+   (JS↔JavaScript, Node.js↔NodeJS), light stemming (design↔designing), and experience
+   qualifiers ("3 years React" → "React"). It returns each requirement's match type and
+   the resume evidence.
+3. For anything missing, Claude **chains** to `suggest_resume_edits(resume_text, missing)`,
+   which bridges each gap from a same-category skill already in the resume.
+4. Claude writes the fit score, strengths, and gaps **using only the tools' results as
+   ground truth**. That is the anti-hallucination story: the model orchestrates, the tools
+   decide what's actually in the resume.
 
 ## Requirements matched to what each layer proves
 
@@ -38,7 +42,7 @@ Flow of one analysis:
 | --- | --- |
 | `packages/web` | ReactJS, TypeScript, responsive UI, streaming responses |
 | `packages/server` | Node backend integration, agentic workflow, Claude API |
-| `packages/mcp-server` | Model Context Protocol server, grounding / reducing hallucination |
+| `packages/mcp-server` | Model Context Protocol server, deterministic grounding, tool chaining |
 
 ## Run it
 
@@ -52,8 +56,8 @@ npm run dev               # builds the MCP server, then starts API + web
 - API: http://localhost:8787
 
 **No API key yet?** It still runs. Without `ANTHROPIC_API_KEY` the app drops into a demo
-mode that exercises the MCP coverage tool directly (deterministic, no LLM) so you can see
-the pipeline end-to-end before wiring up billing.
+mode that exercises both MCP tools directly (coverage, then the chained edit suggestions —
+deterministic, no LLM) so you can see the pipeline end-to-end before wiring up billing.
 
 ## Deploy (Render Blueprint)
 
@@ -78,6 +82,6 @@ forwards `/api` to `:8787`.
 ## Next steps
 
 - [x] Render the streamed Markdown properly (add `react-markdown`).
-- [ ] Smarter matching in the MCP tool (synonyms, stemming, "3 years React" vs "React").
-- [ ] A second MCP tool, e.g. `suggest_resume_edits`, and let Claude chain them.
+- [x] Smarter matching in the MCP tool (aliases, stemming, "3 years React" → "React").
+- [x] A second MCP tool (`suggest_resume_edits`) that Claude chains after coverage.
 - [ ] Persist past analyses; add a share link.

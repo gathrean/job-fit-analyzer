@@ -5,18 +5,21 @@ const MODEL = process.env.MODEL ?? "claude-opus-4-8";
 
 const SYSTEM = `You are a Job-Fit Analyzer. Given a job posting and a candidate's resume, assess how well the candidate fits the role.
 
-You have one tool: check_keyword_coverage(resume_text, requirements). It deterministically reports which of a list of requirements actually appear in the resume. This is your source of truth — never guess whether a skill is present.
+You have two deterministic tools — treat their output as ground truth, never guess:
+- check_keyword_coverage(resume_text, requirements): reports which requirements actually appear in the resume, with a match_type and evidence for each.
+- suggest_resume_edits(resume_text, missing_requirements): turns a list of gaps into concrete, grounded edit suggestions.
 
 Do this in order:
 1. Read the job posting and extract 6-12 concrete, checkable requirements (skills, tools, qualifications). Keep each short, e.g. "React", "TypeScript", "REST API design".
 2. Call check_keyword_coverage once with the resume text and that list.
-3. Using ONLY the tool's covered/missing result as ground truth, write in clean Markdown:
+3. If it reports any missing requirements, call suggest_resume_edits with the resume text and that missing list.
+4. Using ONLY the tools' results as ground truth, write in clean Markdown:
    - **Fit score:** a number out of 100.
-   - **Strengths:** requirements the resume covers.
-   - **Gaps:** requirements it is missing, each with a one-line suggestion.
+   - **Strengths:** requirements the resume covers (you may cite the evidence).
+   - **Gaps:** each missing requirement with the one-line suggestion from suggest_resume_edits.
    - **Verdict:** two sentences.
 
-Never claim a requirement is met unless the tool marked it covered.`;
+Never claim a requirement is met unless check_keyword_coverage marked it covered.`;
 
 export type Send = (event: string, data: unknown) => void;
 
@@ -87,19 +90,38 @@ async function runDemo({ jobPosting, resume }: AnalyzeInput, send: Send): Promis
     "**Demo mode** (no `ANTHROPIC_API_KEY` set). Running the MCP coverage tool directly — no LLM.\n\n",
   );
 
+  // Naive keyword pull — good enough to show the tools working without an LLM.
+  // (With an API key, Claude does the real extraction.) Drop obvious noise words
+  // so the demo output reads like requirements, not sentence filler.
+  const STOP = new Set([
+    "need", "and", "with", "the", "for", "you", "our", "are", "will", "must",
+    "have", "want", "years", "year", "experience", "engineer", "developer",
+    "strong", "plus", "who", "this", "that", "role", "team", "work", "using",
+  ]);
   const requirements = Array.from(
     new Set((jobPosting.match(/[A-Za-z][A-Za-z+.#]{2,}/g) ?? []).map((s) => s)),
-  ).slice(0, 12);
+  )
+    .filter((w) => !STOP.has(w.toLowerCase()))
+    .slice(0, 12);
 
-  const output = await callMcpTool("check_keyword_coverage", {
+  const coverage = await callMcpTool("check_keyword_coverage", {
     resume_text: resume,
     requirements,
   });
-
   send("tool", { name: "check_keyword_coverage", input: { requirements } });
-  send(
-    "delta",
-    "```json\n" + output + "\n```\n\nSet `ANTHROPIC_API_KEY` in `.env` for the full AI analysis.",
-  );
+  send("delta", "**check_keyword_coverage**\n\n```json\n" + coverage + "\n```\n\n");
+
+  // Chain the second tool on whatever came back missing — the same flow Claude runs.
+  const missing = (JSON.parse(coverage) as { missing?: string[] }).missing ?? [];
+  if (missing.length > 0) {
+    const edits = await callMcpTool("suggest_resume_edits", {
+      resume_text: resume,
+      missing_requirements: missing,
+    });
+    send("tool", { name: "suggest_resume_edits", input: { missing_requirements: missing } });
+    send("delta", "**suggest_resume_edits** (chained on the gaps)\n\n```json\n" + edits + "\n```\n\n");
+  }
+
+  send("delta", "Set `ANTHROPIC_API_KEY` in `.env` for the full AI analysis.");
   send("done", {});
 }
